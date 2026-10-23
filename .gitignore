@@ -10,3 +10,6 @@ logs/
 .env
 .env.local
 .env.*.local
+
+# Encrypted, ephemeral session state (never commit the cache)
+.wxread-session/

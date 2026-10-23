@@ -8,7 +8,8 @@ import requests
 import urllib.parse
 from push import push
 from log_utils import setup_logging
-from config import data, headers, cookies, READ_NUM, PUSH_METHOD, book, chapter
+from config import data, headers, cookies, READ_NUM, PUSH_METHOD, book, chapter, curl_str
+from session_state import EncryptedCookieState
 
 
 # 加密盐及其它默认值
@@ -43,6 +44,7 @@ def cal_hash(input_string):
 
     return hex(_7032f5 + _cc1055)[2:].lower()
 
+
 def get_wr_skey():
     """刷新cookie密钥"""
     for cookie_data in COOKIE_DATA_VARIANTS:
@@ -54,17 +56,21 @@ def get_wr_skey():
                 data=json.dumps(cookie_data, separators=(',', ':')),
                 timeout=REQUEST_TIMEOUT,
             )
-            
+
             if 'wr_skey' in response.cookies:
-                return response.cookies['wr_skey'][:8]
+                # Server may also rotate longer-lived authentication cookies.
+                EncryptedCookieState.absorb_response(cookies, response)
+                session_state.save(cookies)
+                return response.cookies['wr_skey']
             else:
                 continue
         except requests.RequestException as exc:
             logging.warning(f"refresh_cookie 请求失败，payload={cookie_data}，原因：{exc}")
             continue
-        
-        
+
+
     return None
+
 
 def fix_no_synckey():
     response = requests.post(
@@ -76,7 +82,11 @@ def fix_no_synckey():
     )
     response.raise_for_status()
 
+
 refresh_print = setup_logging()
+session_state = EncryptedCookieState(curl_str, __import__('os').getenv('WXREAD_SESSION_STATE_PATH'))
+session_state.restore(cookies)
+
 
 def refresh_cookie(strict=True):
     logging.info("刷新 cookie")
@@ -84,6 +94,7 @@ def refresh_cookie(strict=True):
     if new_skey:
         cookies['wr_skey'] = new_skey
         logging.info(f"密钥刷新成功，新密钥：{new_skey[:2]}***")
+        session_state.save(cookies)
         logging.info("重新本次阅读。")
         return True
 
@@ -95,6 +106,7 @@ def refresh_cookie(strict=True):
 
     logging.warning("启动时未获取到新密钥，保留现有 cookie 继续尝试阅读。")
     return False
+
 
 # renewal 失败不等于当前阅读会话已失效；启动时刷新失败也继续尝试阅读。
 refresh_cookie(strict=False)
@@ -142,6 +154,8 @@ while index <= READ_NUM:
     logging.debug("response: %s", resData)
 
     if 'succ' in resData:
+        if EncryptedCookieState.absorb_response(cookies, response):
+            session_state.save(cookies)
         if 'synckey' in resData:
             synckey_repair_attempts = 0
             lastTime = thisTime

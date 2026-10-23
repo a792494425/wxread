@@ -39,11 +39,20 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install certifi==2024.8.30 charset-normalizer==3.4.0 idna==3.10 requests==2.32.3 urllib3==2.2.3
+        pip install certifi==2024.8.30 charset-normalizer==3.4.0 idna==3.10 requests==2.32.3 urllib3==2.2.3 'cryptography>=43,<47'
+
+    - name: Restore encrypted session cache
+      uses: actions/cache/restore@v4
+      with:
+        path: .wxread-session/session.enc
+        key: wxread-session-${{ runner.os }}-${{ github.run_id }}
+        restore-keys: |
+          wxread-session-${{ runner.os }}-
 
     - name: Run deployment script
       env:
         WXREAD_CURL_BASH: ${{ secrets.WXREAD_CURL_BASH }}
+        WXREAD_SESSION_STATE_PATH: .wxread-session/session.enc
         PUSH_METHOD: ${{ secrets.PUSH_METHOD }}
         PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         WXPUSHER_SPT: ${{ secrets.WXPUSHER_SPT }}
@@ -54,6 +63,13 @@ jobs:
 
       run: |
         python main.py
+
+    - name: Save encrypted session cache
+      if: ${{ always() && hashFiles('.wxread-session/session.enc') != '' }}
+      uses: actions/cache/save@v4
+      with:
+        path: .wxread-session/session.enc
+        key: wxread-session-${{ runner.os }}-${{ github.run_id }}
 
   keepalive-job:
     name: Keepalive Workflow
